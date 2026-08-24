@@ -1,3 +1,6 @@
 streamlit
 geopy
 simplekml
+numpy
+pandas
+openpyxl
