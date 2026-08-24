@@ -16,7 +16,7 @@ st.set_page_config(
 
 st.title("🛣️ Highway Best Fit Alignment & Chainage Engine")
 st.markdown(
-    "Upload raw KML to generate **Best Fit Alignment**, automatic **Chainage Markers**, and an **Excel Engineering Report** in one single step."
+    "Upload raw KML to generate **Best Fit Alignment**, automatic **Chainage Markers**, **Voice Alert Tour**, and an **Excel Engineering Report**."
 )
 
 # ---------------------------------------------------------
@@ -93,6 +93,64 @@ def calculate_bearing(p1, p2):
     ) * math.cos(dlon)
     initial_bearing = math.atan2(x, y)
     return (math.degrees(initial_bearing) + 360) % 360
+
+
+def generate_voice_tour_kml(smoothed_coords, start_chainage, interval_km=1.0):
+    kml_tour = simplekml.Kml(name="Alignment Voice Navigation")
+
+    line = kml_tour.newlinestring(
+        name="Route Line", coords=[(c[1], c[0]) for c in smoothed_coords]
+    )
+    line.style.linestyle.width = 4
+    line.style.linestyle.color = simplekml.Color.cyan
+
+    tour = kml_tour.newgxtour(name="▶️ Start Voice Navigation Tour")
+    playlist = tour.newgxplaylist()
+
+    accumulated_dist = 0.0
+    curr_ch = float(start_chainage)
+    target_km = (
+        math.ceil(curr_ch / 1000.0) * 1000.0
+        if curr_ch % 1000 != 0
+        else curr_ch + 1000.0
+    )
+
+    for i in range(len(smoothed_coords) - 1):
+        p1 = smoothed_coords[i]
+        p2 = smoothed_coords[i + 1]
+        seg_m = geodesic(p1, p2).meters
+
+        while (curr_ch + accumulated_dist + seg_m) >= target_km:
+            overshoot = target_km - (curr_ch + accumulated_dist)
+            frac = overshoot / seg_m if seg_m > 0 else 0
+
+            t_lat = p1[0] + frac * (p2[0] - p1[0])
+            t_lon = p1[1] + frac * (p2[1] - p1[1])
+
+            km_val = int(target_km // 1000)
+            alert_text = f"Chainage {km_val} Kilometer"
+
+            pnt = kml_tour.newpoint(
+                name=f"🔊 {km_val}+000 KM", coords=[(t_lon, t_lat)]
+            )
+            pnt.description = f"Voice Alert: {alert_text}"
+            pnt.style.iconstyle.scale = 1.2
+            pnt.style.iconstyle.color = simplekml.Color.blue
+
+            flyto = playlist.newgxflyto()
+            flyto.camera.latitude = t_lat
+            flyto.camera.longitude = t_lon
+            flyto.camera.altitude = 150
+            flyto.camera.tilt = 45
+
+            wait = playlist.newgxwait()
+            wait.duration = 2.0
+
+            target_km += interval_km * 1000.0
+
+        accumulated_dist += seg_m
+
+    return kml_tour.kml()
 
 
 def generate_excel_alignment_report(
@@ -221,7 +279,6 @@ with col1:
         max_value=15.0,
         value=3.0,
         step=0.5,
-        help="Max deviation allowed from existing road centerline",
     )
 with col2:
     min_curve_radius = st.number_input(
@@ -231,7 +288,7 @@ with col2:
     )
 with col3:
     start_chainage = st.number_input(
-        "Start Chainage (m)", value=0, step=100, help="E.g. 0 for 0+000"
+        "Start Chainage (m)", value=0, step=100
     )
 with col4:
     design_speed = st.number_input(
@@ -257,29 +314,23 @@ output_name = st.text_input(
 
 if uploaded_file is not None:
     if st.button(
-        "🚀 Generate Best Fit Alignment + Chainages + Report", type="primary"
+        "🚀 Generate Alignment + Chainages + Voice Tour", type="primary"
     ):
         raw_coords = extract_coords(uploaded_file.read())
 
         if not raw_coords or len(raw_coords) < 3:
-            st.error(
-                "Insufficient points in KML to construct alignment curves!"
-            )
+            st.error("Insufficient points in KML!")
         else:
             if reverse_direction:
                 raw_coords = raw_coords[::-1]
 
-            # 1. Best Fit Tangents & Curves Processing
             pi_coords = fit_best_tangents_rdp(raw_coords, max_allowed_offset)
 
             curve_data = []
-            smoothed_coords = [
-                (pi_coords[0][0], pi_coords[0][1])
-            ]  # stored as (lat, lon)
+            smoothed_coords = [(pi_coords[0][0], pi_coords[0][1])]
 
             kml_fit = simplekml.Kml()
 
-            # Original Ground Track (Thin Yellow Line)
             orig_line = kml_fit.newlinestring(
                 name="Original Ground Track",
                 coords=[(c[1], c[0]) for c in raw_coords],
@@ -367,7 +418,6 @@ if uploaded_file is not None:
 
             smoothed_coords.append((pi_coords[-1][0], pi_coords[-1][1]))
 
-            # 2. Add Best Fit Line (Cyan Line Work)
             fit_line = kml_fit.newlinestring(
                 name="Best Fit Road Alignment",
                 coords=[(c[1], c[0]) for c in smoothed_coords],
@@ -375,11 +425,9 @@ if uploaded_file is not None:
             fit_line.style.linestyle.width = 4
             fit_line.style.linestyle.color = simplekml.Color.cyan
 
-            # 3. Add Chainage Markers Directly onto New Best Fit Line
             accumulated_dist = 0.0
             curr_ch = float(start_chainage)
 
-            # Start point chainage marker
             km = int(curr_ch // 1000)
             m = int(curr_ch % 1000)
             pnt = kml_fit.newpoint(
@@ -424,14 +472,14 @@ if uploaded_file is not None:
             total_road_length = accumulated_dist
 
             st.success(
-                f"✅ Success! Best Fit Alignment with Chainages Generated. Total Road Length: {total_road_length/1000:.3f} km"
+                f"✅ Success! Generated Best Fit Alignment & Tour for {total_road_length/1000:.3f} km"
             )
 
             df_curves = pd.DataFrame(curve_data)
             st.write("### 📋 Horizontal Curve Geometry Schedule")
             st.dataframe(df_curves, use_container_width=True)
 
-            col_dl1, col_dl2, col_dl3 = st.columns(3)
+            col_dl1, col_dl2, col_dl3, col_dl4 = st.columns(4)
 
             fname_out = (
                 output_name.strip()
@@ -444,20 +492,33 @@ if uploaded_file is not None:
 
             with col_dl1:
                 st.download_button(
-                    label=f"📥 Download KML (Alignment + Chainages)",
+                    label="📥 Download Standard KML",
                     data=kml_fit.kml(),
                     file_name=fname_out,
                     mime="application/vnd.google-earth.kml+xml",
                 )
+
             with col_dl2:
+                voice_kml_data = generate_voice_tour_kml(
+                    smoothed_coords, start_chainage
+                )
+                st.download_button(
+                    label="🔊 Download Voice Alert Tour KML",
+                    data=voice_kml_data,
+                    file_name=f"Voice_Tour_{fname_out}",
+                    mime="application/vnd.google-earth.kml+xml",
+                )
+
+            with col_dl3:
                 csv_data = df_curves.to_csv(index=False).encode("utf-8")
                 st.download_button(
-                    label="📊 Download Curve Data (CSV)",
+                    label="📊 Download CSV Data",
                     data=csv_data,
                     file_name="Best_Fit_Curve_Schedule.csv",
                     mime="text/csv",
                 )
-            with col_dl3:
+
+            with col_dl4:
                 excel_report = generate_excel_alignment_report(
                     curve_data,
                     total_road_length,
@@ -465,7 +526,7 @@ if uploaded_file is not None:
                     "Existing Alignment Best Fit",
                 )
                 st.download_button(
-                    label="📄 Download Engineering Report (Excel)",
+                    label="📄 Download Excel Report",
                     data=excel_report,
                     file_name="Best_Fit_Alignment_Engineering_Report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
