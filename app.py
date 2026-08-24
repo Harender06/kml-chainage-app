@@ -34,9 +34,9 @@ def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
 
     kml = simplekml.Kml()
 
-    # 1. Road Alignment Line जोड़ना (Red Color & Width 4)
+    # 1. Road Alignment Line (newlinestring का उपयोग सही है)
     linestring_coords = [(c[1], c[0]) for c in coords]
-    line = kml.newline(name="Road Alignment", coords=linestring_coords)
+    line = kml.newlinestring(name="Road Alignment", coords=linestring_coords)
     line.style.linestyle.width = 4
     line.style.linestyle.color = simplekml.Color.red
 
