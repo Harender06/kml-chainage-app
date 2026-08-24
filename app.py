@@ -7,7 +7,7 @@ st.set_page_config(page_title="KML Chainage Generator", layout="centered")
 
 st.title("🛣️ Road KML Chainage Generator")
 st.write(
-    "अपनी Alignment KML फ़ाइल अपलोड करें और Direction सेलेक्ट करके Chainage जनरेट करें।"
+    "अपनी Alignment KML फ़ाइल अपलोड करें और Line + Chainages दोनों तुरंत जनरेट करें।"
 )
 
 
@@ -29,15 +29,21 @@ def extract_coords(kml_bytes):
 
 
 def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
-    # अगर यूजर रिवर्स सिलेक्ट करे तो पॉइंट्स उल्टे कर दें
     if reverse_dir:
         coords = coords[::-1]
 
     kml = simplekml.Kml()
+
+    # 1. Road Alignment Line जोड़ना (Red Color & Width 4)
+    linestring_coords = [(c[1], c[0]) for c in coords]
+    line = kml.newline(name="Road Alignment", coords=linestring_coords)
+    line.style.linestyle.width = 4
+    line.style.linestyle.color = simplekml.Color.red
+
     accumulated_dist = 0.0
     current_chainage = float(start_ch)
 
-    # Start Point (0+000 या Start Chainage)
+    # Start Point (0+000)
     km = int(current_chainage // 1000)
     m = int(current_chainage % 1000)
     pnt = kml.newpoint(
@@ -48,6 +54,7 @@ def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
 
     next_target = current_chainage + minor_int
 
+    # 2. Chainage Points जनरेट करना
     for i in range(len(coords) - 1):
         p1, p2 = coords[i], coords[i + 1]
         segment_dist = geodesic(p1, p2).meters
@@ -65,12 +72,12 @@ def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
 
             pnt = kml.newpoint(name=ch_text, coords=[(target_lon, target_lat)])
 
-            # Major vs Minor Color
+            # Major vs Minor Styling
             if int(next_target) % major_int == 0:
-                pnt.style.iconstyle.scale = 1.0  # Major (100m) Red
+                pnt.style.iconstyle.scale = 1.0  # Major (100m) - Red Pin
                 pnt.style.iconstyle.color = simplekml.Color.red
             else:
-                pnt.style.iconstyle.scale = 0.6  # Minor (20m) Yellow
+                pnt.style.iconstyle.scale = 0.6  # Minor (20m) - Yellow Pin
                 pnt.style.iconstyle.color = simplekml.Color.yellow
 
             next_target += minor_int
@@ -80,7 +87,7 @@ def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
     return kml.kml(), accumulated_dist
 
 
-# UI Setup
+# UI Layout
 uploaded_file = st.file_uploader("KML File Upload Karein", type=["kml"])
 
 col1, col2, col3 = st.columns(3)
@@ -95,7 +102,6 @@ with col2:
 with col3:
     minor_interval = st.number_input("Minor Interval (m)", value=20, step=5)
 
-# Direction Toggle Button
 reverse_direction = st.checkbox(
     "🔄 Reverse Road Direction (चेनज दूसरी तरफ से शुरू करें)"
 )
