@@ -7,7 +7,7 @@ st.set_page_config(page_title="KML Chainage Generator", layout="centered")
 
 st.title("🛣️ Road KML Chainage Generator")
 st.write(
-    "अपनी Alignment KML फ़ाइल अपलोड करें, Custom Settings चुनें और Line + Chainages दोनों डाउनलोड करें।"
+    "Upload your Alignment KML file, configure interval settings, and download line with chainages."
 )
 
 
@@ -54,7 +54,7 @@ def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
 
     next_target = current_chainage + minor_int
 
-    # 2. Chainage Points जनरेट करना
+    # 2. Chainage Points Generation
     for i in range(len(coords) - 1):
         p1, p2 = coords[i], coords[i + 1]
         segment_dist = geodesic(p1, p2).meters
@@ -88,12 +88,12 @@ def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
 
 
 # UI Layout
-uploaded_file = st.file_uploader("KML File Upload Karein", type=["kml"])
+uploaded_file = st.file_uploader("Upload KML File", type=["kml"])
 
 col1, col2, col3 = st.columns(3)
 with col1:
     start_chainage = st.number_input(
-        "Start Chainage (m)", value=0, step=100, help="Eg: 0 for 0+000"
+        "Start Chainage (m)", value=0, step=100, help="E.g., 0 for 0+000"
     )
 with col2:
     major_interval = st.number_input(
@@ -104,13 +104,13 @@ with col3:
 
 # Output File Name Input
 output_name = st.text_input(
-    "Output File Name (ऐच्छिक / Optional)",
+    "Output File Name (Optional)",
     value="Chainage_Output",
-    help="बिना .kml लिखे नाम दर्ज करें",
+    help="Enter file name without extension",
 )
 
 reverse_direction = st.checkbox(
-    "🔄 Reverse Road Direction (चेनज दूसरी तरफ से शुरू करें)"
+    "🔄 Reverse Road Direction (Start chainage from opposite end)"
 )
 
 if uploaded_file is not None:
@@ -119,7 +119,7 @@ if uploaded_file is not None:
         coords = extract_coords(kml_bytes)
 
         if not coords:
-            st.error("KML file me koi line data nahi mila!")
+            st.error("No valid line string data found in the KML file!")
         else:
             kml_data, total_len = generate_chainage_kml(
                 coords,
@@ -128,7 +128,7 @@ if uploaded_file is not None:
                 minor_interval,
                 reverse_direction,
             )
-            st.success(f"Done! Total Length: {total_len/1000:.3f} km")
+            st.success(f"Success! Total Road Length: {total_len/1000:.3f} km")
 
             # File name formatting
             clean_filename = (
