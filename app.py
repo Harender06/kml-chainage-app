@@ -47,7 +47,6 @@ def fit_best_tangents_rdp(pts, max_deviation_m):
     if len(pts) < 3:
         return pts
 
-    # Convert approx meters for offset check
     lat_deg_to_m = 111000.0
     lon_deg_to_m = 111000.0 * math.cos(math.radians(pts[0][0]))
 
@@ -370,7 +369,6 @@ with tab2:
             if not raw_coords or len(raw_coords) < 3:
                 st.error("Insufficient points in KML to construct alignment curves!")
             else:
-                # Extract Tangents adhering strictly within max_allowed_offset of existing road centerline
                 pi_coords = fit_best_tangents_rdp(raw_coords, max_allowed_offset)
 
                 curve_data = []
@@ -379,7 +377,7 @@ with tab2:
 
                 kml_fit = simplekml.Kml()
 
-                # Add original line for comparison (Yellow Dash)
+                # Add original track for reference (Thin Yellow Line)
                 orig_line = kml_fit.newlinestring(
                     name="Original Ground Track",
                     coords=[(c[1], c[0]) for c in raw_coords],
@@ -409,12 +407,19 @@ with tab2:
                     dist_prev = geodesic(p_prev, p_curr).meters
                     dist_next = geodesic(p_curr, p_next).meters
 
-                    # Calculate best curve radius fitting available tangent length
-                    desired_t = min_curve_radius * math.tan(delta_rad / 2) if delta_rad > 0 else 0
+                    desired_t = (
+                        min_curve_radius * math.tan(delta_rad / 2)
+                        if delta_rad > 0
+                        else 0
+                    )
                     max_t = min(dist_prev / 2, dist_next / 2)
 
                     actual_t = min(desired_t, max_t)
-                    fitted_radius = (actual_t / math.tan(delta_rad / 2)) if delta_rad > 0 else min_curve_radius
+                    fitted_radius = (
+                        (actual_t / math.tan(delta_rad / 2))
+                        if delta_rad > 0
+                        else min_curve_radius
+                    )
                     arc_length = fitted_radius * delta_rad
 
                     frac_pc = 1.0 - (actual_t / dist_prev if dist_prev > 0 else 0)
@@ -456,13 +461,6 @@ with tab2:
                         ) * f * p_curr[1] + f**2 * pt_lon
                         smoothed_coords.append((lon_interp, lat_interp))
 
-                    pnt = kml_fit.newpoint(
-                        name=f"PI-{i} (Δ={deflection:.1f}°, R={fitted_radius:.0f}m)",
-                        coords=[(p_curr[1], p_curr[0])],
-                    )
-                    pnt.style.iconstyle.scale = 0.8
-                    pnt.style.iconstyle.color = simplekml.Color.red
-
                     running_chainage = pt_chainage
 
                 smoothed_coords.append((pi_coords[-1][1], pi_coords[-1][0]))
@@ -471,6 +469,7 @@ with tab2:
                     pi_coords[-2], pi_coords[-1]
                 ).meters
 
+                # Add Best Fit Smooth Line (Cyan Line)
                 fit_line = kml_fit.newlinestring(
                     name="Best Fit Road Alignment",
                     coords=smoothed_coords,
@@ -479,7 +478,7 @@ with tab2:
                 fit_line.style.linestyle.color = simplekml.Color.cyan
 
                 st.success(
-                    f"Best Fit Alignment created over existing centerline! Total Length: {total_road_length/1000:.3f} km"
+                    f"Clean Best Fit Alignment generated! Total Length: {total_road_length/1000:.3f} km"
                 )
 
                 df_curves = pd.DataFrame(curve_data)
@@ -497,7 +496,7 @@ with tab2:
 
                 with col_dl1:
                     st.download_button(
-                        label=f"📥 Download Best Fit KML",
+                        label=f"📥 Download Clean Alignment KML",
                         data=kml_fit.kml(),
                         file_name=fname2,
                         mime="application/vnd.google-earth.kml+xml",
@@ -518,7 +517,7 @@ with tab2:
                         "Existing Alignment Best Fit",
                     )
                     st.download_button(
-                        label="📄 Download Detailed Engineering Report (Excel)",
+                        label="📄 Download Engineering Report (Excel)",
                         data=excel_report,
                         file_name="Best_Fit_Alignment_Engineering_Report.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
