@@ -43,7 +43,7 @@ def extract_coords(kml_bytes):
 
 def fit_best_tangents_rdp(pts, max_deviation_m):
     """Segment points into best fit straight tangents with max allowed offset deviation in meters"""
-    if len(pts) < 3:
+    if len(pts) < 1:
         return pts
 
     lat_deg_to_m = 111000.0
