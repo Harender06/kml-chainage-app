@@ -7,7 +7,7 @@ st.set_page_config(page_title="KML Chainage Generator", layout="centered")
 
 st.title("🛣️ Road KML Chainage Generator")
 st.write(
-    "अपनी Alignment KML फ़ाइल अपलोड करें और Line + Chainages दोनों तुरंत जनरेट करें।"
+    "अपनी Alignment KML फ़ाइल अपलोड करें, Custom Settings चुनें और Line + Chainages दोनों डाउनलोड करें।"
 )
 
 
@@ -34,7 +34,7 @@ def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
 
     kml = simplekml.Kml()
 
-    # 1. Road Alignment Line (newlinestring का उपयोग सही है)
+    # 1. Road Alignment Line (Red Line)
     linestring_coords = [(c[1], c[0]) for c in coords]
     line = kml.newlinestring(name="Road Alignment", coords=linestring_coords)
     line.style.linestyle.width = 4
@@ -43,7 +43,7 @@ def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
     accumulated_dist = 0.0
     current_chainage = float(start_ch)
 
-    # Start Point (0+000)
+    # Start Point
     km = int(current_chainage // 1000)
     m = int(current_chainage % 1000)
     pnt = kml.newpoint(
@@ -102,6 +102,13 @@ with col2:
 with col3:
     minor_interval = st.number_input("Minor Interval (m)", value=20, step=5)
 
+# Output File Name Input
+output_name = st.text_input(
+    "Output File Name (ऐच्छिक / Optional)",
+    value="Chainage_Output",
+    help="बिना .kml लिखे नाम दर्ज करें",
+)
+
 reverse_direction = st.checkbox(
     "🔄 Reverse Road Direction (चेनज दूसरी तरफ से शुरू करें)"
 )
@@ -123,9 +130,18 @@ if uploaded_file is not None:
             )
             st.success(f"Done! Total Length: {total_len/1000:.3f} km")
 
+            # File name formatting
+            clean_filename = (
+                output_name.strip() if output_name.strip() else "Chainage_Output"
+            )
+            if not clean_filename.endswith(".kml"):
+                final_filename = f"{clean_filename}.kml"
+            else:
+                final_filename = clean_filename
+
             st.download_button(
-                label="📥 Download Chainage KML",
+                label=f"📥 Download {final_filename}",
                 data=kml_data,
-                file_name="Chainage_Output.kml",
+                file_name=final_filename,
                 mime="application/vnd.google-earth.kml+xml",
             )
