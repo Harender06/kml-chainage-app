@@ -1,12 +1,18 @@
+import io
 import math
 import xml.etree.ElementTree as ET
 from geopy.distance import geodesic
 import numpy as np
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 import pandas as pd
 import simplekml
 import streamlit as st
 
-st.set_page_config(page_title="Highway Alignment & Chainage Tool", layout="wide")
+st.set_page_config(
+    page_title="Highway Alignment & Chainage Tool", layout="wide"
+)
 
 st.title("🛣️ Highway Alignment & Chainage Engineering Tool")
 
@@ -15,7 +21,7 @@ tab1, tab2 = st.tabs(
 )
 
 # ---------------------------------------------------------
-# COMMON HELPER FUNCTIONS
+# HELPER FUNCTIONS
 # ---------------------------------------------------------
 
 
@@ -78,6 +84,121 @@ def calculate_bearing(p1, p2):
     ) * math.cos(dlon)
     initial_bearing = math.atan2(x, y)
     return (math.degrees(initial_bearing) + 360) % 360
+
+
+def generate_excel_alignment_report(
+    curve_data, total_len, design_speed, terrain_type
+):
+    """Generates a professional Excel Engineering Report for Horizontal Alignment"""
+    wb = openpyxl.Workbook()
+
+    # Sheet 1: Executive Summary
+    ws_sum = wb.active
+    ws_sum.title = "Executive Summary"
+    ws_sum.views.sheetView[0].showGridLines = True
+
+    # Header styling
+    header_fill = PatternFill(
+        start_color="1F4E78", end_color="1F4E78", fill_type="solid"
+    )
+    section_fill = PatternFill(
+        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
+    )
+    white_bold = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    title_font = Font(name="Calibri", size=16, bold=True, color="1F4E78")
+    bold_font = Font(name="Calibri", size=11, bold=True)
+    normal_font = Font(name="Calibri", size=11)
+
+    thin_border = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9"),
+    )
+
+    ws_sum["A1"] = "HIGHWAY HORIZONTAL ALIGNMENT DESIGN REPORT"
+    ws_sum["A1"].font = title_font
+
+    ws_sum["A3"] = "1. Project & Design Criteria Summary"
+    ws_sum.merge_cells("A3:D3")
+    ws_sum["A3"].font = bold_font
+    ws_sum["A3"].fill = section_fill
+
+    summary_rows = [
+        ("Design Speed", f"{design_speed} km/h"),
+        ("Terrain Classification", terrain_type),
+        ("Total Road Alignment Length", f"{total_len/1000:.3f} km"),
+        ("Total Intersection Points (PIs)", len(curve_data)),
+        ("Standard Guidelines", "IRC:73 / IRC:SP:48 / MORTH"),
+    ]
+
+    for r_idx, (k, v) in enumerate(summary_rows, start=4):
+        ws_sum.cell(row=r_idx, column=1, value=k).font = bold_font
+        ws_sum.cell(row=r_idx, column=2, value=v).font = normal_font
+
+    # Sheet 2: Curve Data Schedule
+    ws_curves = wb.create_sheet(title="Horizontal Curve Schedule")
+    ws_curves.views.sheetView[0].showGridLines = True
+
+    headers = [
+        "PI No.",
+        "Latitude (°)",
+        "Longitude (°)",
+        "Deflection Angle Δ (°)",
+        "Direction",
+        "Design Radius R (m)",
+        "Tangent Length T (m)",
+        "Curve Length L (m)",
+        "PC Chainage (m)",
+        "PI Chainage (m)",
+        "PT Chainage (m)",
+    ]
+
+    ws_curves.append(headers)
+    for col_num in range(1, len(headers) + 1):
+        cell = ws_curves.cell(row=1, column=col_num)
+        cell.fill = header_fill
+        cell.font = white_bold
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for row_idx, cd in enumerate(curve_data, start=2):
+        direction = "Right" if cd["Deflection Angle (deg)"] > 0 else "Left"
+        row_vals = [
+            cd["PI Index"],
+            cd["Latitude"],
+            cd["Longitude"],
+            abs(cd["Deflection Angle (deg)"]),
+            direction,
+            cd["Design Radius (m)"],
+            cd["Tangent Length T (m)"],
+            cd["Curve Length L (m)"],
+            cd["PC Chainage (m)"],
+            cd["PI Chainage (m)"],
+            cd["PT Chainage (m)"],
+        ]
+        ws_curves.append(row_vals)
+
+        for c_idx in range(1, len(row_vals) + 1):
+            cell = ws_curves.cell(row=row_idx, column=c_idx)
+            cell.font = normal_font
+            cell.border = thin_border
+            if c_idx in [2, 3, 4, 6, 7, 8, 9, 10, 11]:
+                cell.number_format = "#,##0.00"
+                cell.alignment = Alignment(horizontal="right")
+            else:
+                cell.alignment = Alignment(horizontal="center")
+
+    # Adjust Column Widths
+    for ws in [ws_sum, ws_curves]:
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or "")) for cell in col)
+            col_letter = get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
 
 
 # ---------------------------------------------------------
@@ -198,15 +319,18 @@ with tab1:
 
 
 # ---------------------------------------------------------
-# TAB 2: BEST FIT HORIZONTAL ALIGNMENT
+# TAB 2: BEST FIT HORIZONTAL ALIGNMENT & REPORTING
 # ---------------------------------------------------------
 with tab2:
-    st.subheader("Generate Best Fit Curves & IP Alignment Schedule")
+    st.subheader(
+        "Generate Best Fit Curves & Detailed Horizontal Alignment Report"
+    )
     uploaded_file2 = st.file_uploader(
         "Upload Raw KML Alignment", type=["kml"], key="kml_tab2"
     )
 
-    col_a, col_b = st.columns(2)
+    st.markdown("#### ⚙️ Design & Analysis Parameters")
+    col_a, col_b, col_c = st.columns(3)
     with col_a:
         design_radius = st.number_input(
             "Design Curve Radius R (meters)",
@@ -215,30 +339,41 @@ with tab2:
             help="Design radius for circular curves at IPs",
         )
     with col_b:
-        filter_sensitivity = st.slider(
-            "IP Filtering Sensitivity (Epsilon)",
-            min_value=0.00005,
-            max_value=0.00100,
-            value=0.00020,
-            step=0.00005,
-            format="%.5f",
-            help="Higher values reduce minor vertices and isolate main Intersection Points (PIs)",
+        design_speed = st.number_input(
+            "Design Speed (km/h)",
+            value=60,
+            step=10,
+            help="Project design speed for report compliance check",
+        )
+    with col_c:
+        terrain_type = st.selectbox(
+            "Terrain Classification",
+            ["Plain", "Rolling", "Mountainous / Steep"],
         )
 
+    filter_sensitivity = st.slider(
+        "IP Filtering Sensitivity (Epsilon)",
+        min_value=0.00005,
+        max_value=0.00100,
+        value=0.00020,
+        step=0.00005,
+        format="%.5f",
+        help="Higher values reduce minor vertices and isolate main Intersection Points (PIs)",
+    )
+
     output_name2 = st.text_input(
-        "Output File Name (Optional)",
+        "Output KML Name (Optional)",
         value="Smooth_Alignment_Fit",
         key="name_tab2",
     )
 
     if uploaded_file2 is not None:
-        if st.button("Generate Best Fit Alignment"):
+        if st.button("Generate Alignment & Engineering Report"):
             raw_coords = extract_coords(uploaded_file2.read())
 
             if not raw_coords or len(raw_coords) < 3:
                 st.error("Insufficient points in KML to construct alignment curves!")
             else:
-                # 1. Filter raw polyline to find PIs using RDP
                 pi_coords = rdp_simplify(raw_coords, filter_sensitivity)
 
                 curve_data = []
@@ -265,19 +400,15 @@ with tab2:
                     abs_def = abs(deflection)
                     delta_rad = math.radians(abs_def)
 
-                    # Compute Tangent distance T = R * tan(Delta / 2)
                     tangent_dist = design_radius * math.tan(delta_rad / 2)
                     arc_length = design_radius * delta_rad
 
-                    # Measure distances to adjacent PIs
                     dist_prev = geodesic(p_prev, p_curr).meters
                     dist_next = geodesic(p_curr, p_next).meters
 
-                    # Cap tangent distance if adjacent PIs are too close
                     max_allowable_t = min(dist_prev / 2, dist_next / 2)
                     actual_t = min(tangent_dist, max_allowable_t)
 
-                    # Curve Tangent Points (PC and PT)
                     frac_pc = 1.0 - (actual_t / dist_prev if dist_prev > 0 else 0)
                     pc_lat = p_prev[0] + frac_pc * (p_curr[0] - p_prev[0])
                     pc_lon = p_prev[1] + frac_pc * (p_curr[1] - p_prev[1])
@@ -286,7 +417,6 @@ with tab2:
                     pt_lat = p_curr[0] + frac_pt * (p_next[0] - p_curr[0])
                     pt_lon = p_curr[1] + frac_pt * (p_next[1] - p_curr[1])
 
-                    # Calculate chainages
                     dist_to_pi = geodesic(p_prev, p_curr).meters
                     pi_chainage = running_chainage + dist_to_pi
                     pc_chainage = pi_chainage - actual_t
@@ -307,11 +437,9 @@ with tab2:
                         }
                     )
 
-                    # Interpolate Arc points
                     arc_points = 10
                     for step in range(arc_points + 1):
                         f = step / arc_points
-                        # Blend approximation between PC, PI vertex, and PT
                         lat_interp = (1 - f) ** 2 * pc_lat + 2 * (
                             1 - f
                         ) * f * p_curr[0] + f**2 * pt_lat
@@ -320,7 +448,6 @@ with tab2:
                         ) * f * p_curr[1] + f**2 * pt_lon
                         smoothed_coords.append((lon_interp, lat_interp))
 
-                    # Mark PI in KML
                     pnt = kml_fit.newpoint(
                         name=f"PI-{i} (Δ={deflection:.1f}°)",
                         coords=[(p_curr[1], p_curr[0])],
@@ -332,7 +459,10 @@ with tab2:
 
                 smoothed_coords.append((pi_coords[-1][1], pi_coords[-1][0]))
 
-                # Add Best Fit Smooth Line to KML
+                total_road_length = running_chainage + geodesic(
+                    pi_coords[-2], pi_coords[-1]
+                ).meters
+
                 fit_line = kml_fit.newlinestring(
                     name="Best Fit Horizontal Alignment",
                     coords=smoothed_coords,
@@ -340,25 +470,26 @@ with tab2:
                 fit_line.style.linestyle.width = 4
                 fit_line.style.linestyle.color = simplekml.Color.cyan
 
-                st.success(f"Alignment generated with {len(curve_data)} Intersection Points (PIs)!")
+                st.success(
+                    f"Alignment & Report generated successfully! Total Length: {total_road_length/1000:.3f} km"
+                )
 
-                # Display Schedule Table
                 df_curves = pd.DataFrame(curve_data)
-                st.write("### 📋 Horizontal Curve Schedule")
+                st.write("### 📋 Horizontal Curve Schedule & Geometry")
                 st.dataframe(df_curves, use_container_width=True)
 
-                col_dl1, col_dl2 = st.columns(2)
+                col_dl1, col_dl2, col_dl3 = st.columns(3)
+
+                fname2 = (
+                    output_name2.strip()
+                    if output_name2.strip()
+                    else "Smooth_Alignment_Fit"
+                )
+                fname2 = fname2 if fname2.endswith(".kml") else f"{fname2}.kml"
+
                 with col_dl1:
-                    fname2 = (
-                        output_name2.strip()
-                        if output_name2.strip()
-                        else "Smooth_Alignment_Fit"
-                    )
-                    fname2 = (
-                        fname2 if fname2.endswith(".kml") else f"{fname2}.kml"
-                    )
                     st.download_button(
-                        label=f"📥 Download Best Fit KML ({fname2})",
+                        label=f"📥 Download Alignment KML",
                         data=kml_fit.kml(),
                         file_name=fname2,
                         mime="application/vnd.google-earth.kml+xml",
@@ -366,8 +497,21 @@ with tab2:
                 with col_dl2:
                     csv_data = df_curves.to_csv(index=False).encode("utf-8")
                     st.download_button(
-                        label="📊 Download Curve Schedule (CSV)",
+                        label="📊 Download Curve Data (CSV)",
                         data=csv_data,
                         file_name="Horizontal_Curve_Schedule.csv",
                         mime="text/csv",
+                    )
+                with col_dl3:
+                    excel_report = generate_excel_alignment_report(
+                        curve_data,
+                        total_road_length,
+                        design_speed,
+                        terrain_type,
+                    )
+                    st.download_button(
+                        label="📄 Download Detailed Engineering Report (Excel)",
+                        data=excel_report,
+                        file_name="Horizontal_Alignment_Engineering_Report.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
