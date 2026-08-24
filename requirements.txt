@@ -4,3 +4,4 @@ simplekml
 numpy
 pandas
 openpyxl
+gTTS
