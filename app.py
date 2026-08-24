@@ -7,7 +7,7 @@ st.set_page_config(page_title="KML Chainage Generator", layout="centered")
 
 st.title("🛣️ Road KML Chainage Generator")
 st.write(
-    "अपनी Alignment KML फ़ाइल अपलोड करें और Major/Minor चेनज तुरंत जनरेट करें।"
+    "अपनी Alignment KML फ़ाइल अपलोड करें और Direction सेलेक्ट करके Chainage जनरेट करें।"
 )
 
 
@@ -28,23 +28,32 @@ def extract_coords(kml_bytes):
     return coords
 
 
-def generate_chainage_kml(coords, major_int, minor_int):
+def generate_chainage_kml(coords, start_ch, major_int, minor_int, reverse_dir):
+    # अगर यूजर रिवर्स सिलेक्ट करे तो पॉइंट्स उल्टे कर दें
+    if reverse_dir:
+        coords = coords[::-1]
+
     kml = simplekml.Kml()
-    next_target = 0.0
     accumulated_dist = 0.0
+    current_chainage = float(start_ch)
 
-    # Start Point 0+000
-    pnt = kml.newpoint(name="0+000", coords=[(coords[0][1], coords[0][0])])
+    # Start Point (0+000 या Start Chainage)
+    km = int(current_chainage // 1000)
+    m = int(current_chainage % 1000)
+    pnt = kml.newpoint(
+        name=f"{km}+{m:03d}", coords=[(coords[0][1], coords[0][0])]
+    )
     pnt.style.iconstyle.scale = 1.0
+    pnt.style.iconstyle.color = simplekml.Color.red
 
-    next_target += minor_int
+    next_target = current_chainage + minor_int
 
     for i in range(len(coords) - 1):
         p1, p2 = coords[i], coords[i + 1]
         segment_dist = geodesic(p1, p2).meters
 
-        while accumulated_dist + segment_dist >= next_target:
-            overshoot = next_target - accumulated_dist
+        while (current_chainage + accumulated_dist + segment_dist) >= next_target:
+            overshoot = next_target - (current_chainage + accumulated_dist)
             fraction = overshoot / segment_dist if segment_dist > 0 else 0
 
             target_lat = p1[0] + fraction * (p2[0] - p1[0])
@@ -54,13 +63,14 @@ def generate_chainage_kml(coords, major_int, minor_int):
             m = int(next_target % 1000)
             ch_text = f"{km}+{m:03d}"
 
-            # Major vs Minor Styling
             pnt = kml.newpoint(name=ch_text, coords=[(target_lon, target_lat)])
+
+            # Major vs Minor Color
             if int(next_target) % major_int == 0:
-                pnt.style.iconstyle.scale = 1.0  # Major (100m) bada dikhega
+                pnt.style.iconstyle.scale = 1.0  # Major (100m) Red
                 pnt.style.iconstyle.color = simplekml.Color.red
             else:
-                pnt.style.iconstyle.scale = 0.6  # Minor (20m) chhota dikhega
+                pnt.style.iconstyle.scale = 0.6  # Minor (20m) Yellow
                 pnt.style.iconstyle.color = simplekml.Color.yellow
 
             next_target += minor_int
@@ -70,18 +80,25 @@ def generate_chainage_kml(coords, major_int, minor_int):
     return kml.kml(), accumulated_dist
 
 
-# UI Controls
+# UI Setup
 uploaded_file = st.file_uploader("KML File Upload Karein", type=["kml"])
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 with col1:
-    major_interval = st.number_input(
-        "Major Chainage (Meters)", value=100, step=10
+    start_chainage = st.number_input(
+        "Start Chainage (m)", value=0, step=100, help="Eg: 0 for 0+000"
     )
 with col2:
-    minor_interval = st.number_input(
-        "Minor Chainage (Meters)", value=20, step=5
+    major_interval = st.number_input(
+        "Major Interval (m)", value=100, step=10
     )
+with col3:
+    minor_interval = st.number_input("Minor Interval (m)", value=20, step=5)
+
+# Direction Toggle Button
+reverse_direction = st.checkbox(
+    "🔄 Reverse Road Direction (चेनज दूसरी तरफ से शुरू करें)"
+)
 
 if uploaded_file is not None:
     if st.button("Generate Chainages"):
@@ -92,7 +109,11 @@ if uploaded_file is not None:
             st.error("KML file me koi line data nahi mila!")
         else:
             kml_data, total_len = generate_chainage_kml(
-                coords, major_interval, minor_interval
+                coords,
+                start_chainage,
+                major_interval,
+                minor_interval,
+                reverse_direction,
             )
             st.success(f"Done! Total Length: {total_len/1000:.3f} km")
 
