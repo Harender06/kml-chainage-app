@@ -43,7 +43,7 @@ def extract_coords(kml_bytes):
 
 
 def rdp_simplify(pts, epsilon):
-    """Ramer-Douglas-Peucker algorithm to filter Polyline into PIs"""
+    """Ramer-Douglas-Peucker algorithm to filter Polyline into PIs (Fixed for 2D numpy arrays)"""
     if len(pts) < 3:
         return pts
     dmax = 0.0
@@ -58,9 +58,12 @@ def rdp_simplify(pts, epsilon):
         if np.all(p1 == p2):
             d = np.linalg.norm(p3 - p1)
         else:
-            d = np.linalg.norm(np.cross(p2 - p1, p1 - p3)) / np.linalg.norm(
-                p2 - p1
-            )
+            # 2D cross product for distance to avoid NumPy cross dimension ValueError
+            v1 = p2 - p1
+            v2 = p1 - p3
+            cross_val = abs(v1[0] * v2[1] - v1[1] * v2[0])
+            d = cross_val / np.linalg.norm(v1)
+
         if d > dmax:
             index = i
             dmax = d
@@ -97,7 +100,6 @@ def generate_excel_alignment_report(
     ws_sum.title = "Executive Summary"
     ws_sum.views.sheetView[0].showGridLines = True
 
-    # Header styling
     header_fill = PatternFill(
         start_color="1F4E78", end_color="1F4E78", fill_type="solid"
     )
@@ -188,7 +190,6 @@ def generate_excel_alignment_report(
             else:
                 cell.alignment = Alignment(horizontal="center")
 
-    # Adjust Column Widths
     for ws in [ws_sum, ws_curves]:
         for col in ws.columns:
             max_len = max(len(str(cell.value or "")) for cell in col)
