@@ -260,7 +260,7 @@ if uploaded_file is not None:
     ):
         raw_coords = extract_coords(uploaded_file.read())
 
-        if not raw_coords or len(raw_coords) < 3:
+        if not raw_coords or len(raw_coords) < 1:
             st.error("Insufficient points in KML!")
         else:
             if reverse_direction:
