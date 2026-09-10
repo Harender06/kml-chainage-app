@@ -16,7 +16,7 @@ st.set_page_config(
 
 st.title("🛣️ Highway Best Fit Alignment & Chainage Engine")
 st.markdown(
-    "Upload raw KML to generate **Best Fit Alignment**, automatic **Chainage Markers (20m/100m)**, **Voice Alert Tour**, and an **Excel Engineering Report**."
+    "Upload raw KML to generate **Best Fit Alignment**, automatic **Chainage Markers (20m/100m)**, **Voice Alert Navigation Tour**, and an **Excel Engineering Report** in one single step."
 )
 
 # ---------------------------------------------------------
@@ -25,19 +25,28 @@ st.markdown(
 
 
 def extract_coords(kml_bytes):
-    root = ET.fromstring(kml_bytes)
+    """Robust KML parser capable of reading nested folders, multi-geometries, and various line formats."""
+    try:
+        root = ET.fromstring(kml_bytes)
+    except Exception:
+        return []
+
     coords = []
     for elem in root.iter():
         if elem.tag.endswith("coordinates"):
-            raw_text = elem.text.strip()
-            points = raw_text.split()
-            for p in points:
-                parts = p.split(",")
-                if len(parts) >= 2:
-                    lon, lat = float(parts[0]), float(parts[1])
-                    coords.append((lat, lon))
-            if coords:
-                break
+            raw_text = elem.text
+            if raw_text:
+                raw_text = raw_text.strip().replace("\n", " ").replace("\r", " ")
+                points = raw_text.split()
+                for p in points:
+                    parts = p.split(",")
+                    if len(parts) >= 2:
+                        try:
+                            lon, lat = float(parts[0].strip()), float(parts[1].strip())
+                            if not coords or coords[-1] != (lat, lon):
+                                coords.append((lat, lon))
+                        except ValueError:
+                            continue
     return coords
 
 
@@ -88,27 +97,19 @@ def calculate_bearing(p1, p2):
     lat2, lon2 = math.radians(p2[0]), math.radians(p2[1])
     dlon = lon2 - lon1
     x = math.sin(dlon) * math.cos(lat2)
-    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(
-        lat2
-    ) * math.cos(dlon)
+    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
     initial_bearing = math.atan2(x, y)
     return (math.degrees(initial_bearing) + 360) % 360
 
 
-def generate_excel_alignment_report(
-    curve_data, total_len, design_speed, terrain_type
-):
+def generate_excel_alignment_report(curve_data, total_len, design_speed, terrain_type):
     wb = openpyxl.Workbook()
     ws_sum = wb.active
     ws_sum.title = "Executive Summary"
     ws_sum.views.sheetView[0].showGridLines = True
 
-    header_fill = PatternFill(
-        start_color="1F4E78", end_color="1F4E78", fill_type="solid"
-    )
-    section_fill = PatternFill(
-        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
-    )
+    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     white_bold = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
     title_font = Font(name="Calibri", size=16, bold=True, color="1F4E78")
     bold_font = Font(name="Calibri", size=11, bold=True)
@@ -255,13 +256,13 @@ output_name = st.text_input(
 )
 
 if uploaded_file is not None:
-    if st.button(
-        "🚀 Generate Alignment + Chainages + Voice Tour", type="primary"
-    ):
+    if st.button("🚀 Generate Alignment + Chainages + Voice Tour", type="primary"):
         raw_coords = extract_coords(uploaded_file.read())
 
         if not raw_coords or len(raw_coords) < 3:
-            st.error("Insufficient points in KML!")
+            st.error(
+                "Insufficient points in KML! Please verify that your file contains a valid continuous LineString/Path."
+            )
         else:
             if reverse_direction:
                 raw_coords = raw_coords[::-1]
@@ -303,9 +304,7 @@ if uploaded_file is not None:
                 dist_next = geodesic(p_curr, p_next).meters
 
                 desired_t = (
-                    min_curve_radius * math.tan(delta_rad / 2)
-                    if delta_rad > 0
-                    else 0
+                    min_curve_radius * math.tan(delta_rad / 2) if delta_rad > 0 else 0
                 )
                 max_t = min(dist_prev / 2, dist_next / 2)
 
@@ -348,19 +347,15 @@ if uploaded_file is not None:
                 arc_points = 12
                 for step in range(arc_points + 1):
                     f = step / arc_points
-                    lat_interp = (1 - f) ** 2 * pc_lat + 2 * (
-                        1 - f
-                    ) * f * p_curr[0] + f**2 * pt_lat
-                    lon_interp = (1 - f) ** 2 * pc_lon + 2 * (
-                        1 - f
-                    ) * f * p_curr[1] + f**2 * pt_lon
+                    lat_interp = (1 - f) ** 2 * pc_lat + 2 * (1 - f) * f * p_curr[0] + f**2 * pt_lat
+                    lon_interp = (1 - f) ** 2 * pc_lon + 2 * (1 - f) * f * p_curr[1] + f**2 * pt_lon
                     smoothed_coords.append((lat_interp, lon_interp))
 
                 running_chainage = pt_chainage
 
             smoothed_coords.append((pi_coords[-1][0], pi_coords[-1][1]))
 
-            # Alignment Line
+            # 1. Best Fit Alignment Cyan Line
             fit_line = kml_fit.newlinestring(
                 name="Best Fit Road Alignment",
                 coords=[(c[1], c[0]) for c in smoothed_coords],
@@ -368,13 +363,10 @@ if uploaded_file is not None:
             fit_line.style.linestyle.width = 4
             fit_line.style.linestyle.color = simplekml.Color.cyan
 
-            # ---------------------------------------------------------
-            # 1. ADD ALL MAJOR & MINOR CHAINAGE MARKERS (20m / 100m)
-            # ---------------------------------------------------------
+            # 2. Add Major & Minor Chainage Markers
             accumulated_dist = 0.0
             curr_ch = float(start_chainage)
 
-            # Start point marker
             km = int(curr_ch // 1000)
             m = int(curr_ch % 1000)
             pnt = kml_fit.newpoint(
@@ -385,8 +377,6 @@ if uploaded_file is not None:
             pnt.style.iconstyle.color = simplekml.Color.red
 
             next_target = curr_ch + minor_interval
-
-            # Store KM points for Tour
             tour_km_points = []
 
             for idx in range(len(smoothed_coords) - 1):
@@ -412,9 +402,7 @@ if uploaded_file is not None:
                     if int(next_target) % 1000 == 0:
                         ch_pnt.style.iconstyle.scale = 1.2
                         ch_pnt.style.iconstyle.color = simplekml.Color.blue
-                        ch_pnt.description = (
-                            f"Voice Alert: Chainage {km} Kilometer"
-                        )
+                        ch_pnt.description = f"Voice Alert: Chainage {km} Kilometer"
                         tour_km_points.append((t_lat, t_lon, km))
                     elif int(next_target) % major_interval == 0:
                         ch_pnt.style.iconstyle.scale = 1.0
@@ -429,9 +417,7 @@ if uploaded_file is not None:
 
             total_road_length = accumulated_dist
 
-            # ---------------------------------------------------------
-            # 2. ADD VOICE TOUR PLAYLIST INTO THE SAME KML
-            # ---------------------------------------------------------
+            # 3. Add 1 KM Voice Tour Playlist
             tour = kml_fit.newgxtour(name="▶️ Start Voice Navigation Tour")
             playlist = tour.newgxplaylist()
 
@@ -460,9 +446,7 @@ if uploaded_file is not None:
                 if output_name.strip()
                 else "Alignment_With_Chainages"
             )
-            fname_out = (
-                fname_out if fname_out.endswith(".kml") else f"{fname_out}.kml"
-            )
+            fname_out = fname_out if fname_out.endswith(".kml") else f"{fname_out}.kml"
 
             with col_dl1:
                 st.download_button(
